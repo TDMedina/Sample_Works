@@ -1,0 +1,261 @@
+---
+title: "MA5108 -- Assignment Three"
+output:
+  html_document:
+    code_folding: hide
+    highlight: default
+    theme: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Tyler Medina
+# ID 13101308
+# MA5108: Stats with R
+```
+#ANOVA and Survival Analysis{.tabset .tabset-fade}
+
+##ANOVA Mouse Radiation Study
+
+Exposing bodily cells to radiation elicits a metabolic response, which can be detected by measuring blood metabolite concentrations. In this study, mice are exposed to increasing levels of radiation dosage. After 24 hours, their blood metabolite concentrations are measured, and the composite fold-change values are recorded. The experiment is performed over 4 replicates from 4 different laboratories.
+
+---
+
+```{r READ DATA}
+setwd("C:/Users/Tyler/Documents/BMG/Stats with R/Assignment3/")
+dat <- read.csv("two_way_anova.csv",header=T)
+```
+
+###Data per Laboratory
+
+```{r BOXPLOTS FOR EACH REPLICATE}
+boxplot(dat[which(dat$batch=="A"),1],dat[which(dat$batch=="B"),1],
+        dat[which(dat$batch=="C"),1],dat[which(dat$batch=="D"),1],
+        xlab='Sites',ylab='Fold Change',main="Boxplots for Fold Change against Site")
+axis(1,at=1:4,labels=c("A","B","C","D"))
+```
+The resultant plots in overall fold-change values per laboratory site show that while sites A and C produced somewhat similar replicate data, sites B and D appear to vary widely compared to the others. This indicates that the values obtained from the experiment are not particularly similar, and the results may not be reliable as replicate data unless some kind of background normalization or correction is possible, which depends on experimental design.
+
+---
+
+###Data per Dosage
+
+```{r BOXPLOTS FOR EACH DOSAGE}
+boxplot(dat[which(dat$radiation_dose==2),1],dat[which(dat$radiation_dose==5),1],
+        dat[which(dat$radiation_dose==10),1],xlab='Dose',ylab='Fold Change',
+        main="Boxplots for Fold Change against Dose")
+axis(1,at=1:3,labels=c("2 Gy","5 Gy","10 Gy"))
+```
+Despite the differences between laboratories, it is still worth examining the fold-change per dosage level. In the boxplots above, there is a trend of decreasing metabolite concentration as radiation dosage increases, as clearly evidences by the decreasing median values. However, between the 2 and 5 Gy doses, there is a large amount of overlap, and thus the distributions may not be significantly different.
+
+---
+
+###One-Way ANOVA Testing
+
+Two ANOVA tests will be performed to analyze the effect of dosage on metabolite concentration fold-change, and to analyze the effect of laboratory site on fold change. This will help determine if the change in radiation dose causes significant differences between the metabolite concentrations, and if the differences between the laboratory results are significant.
+
+####ANOVA between Fold-Change Value and Site:
+
+```{r 1WAY ANOVA OF FOLD CHANGE VS SITE}
+Fold_Change <- dat$fold_change
+Site <- dat$batch
+anova(lm(Fold_Change ~ Site))
+```
+
+As shown by the F-Value of 6.48 and the resultant p-value of 9.9E-4, the ANOVA establishes that the variance between the means of the 4 sites is higher than the variance in the samples themselves. In other words, the results obtained from the 4 different sites are statistically different, and do not represent the same distribution of values. This indicates that the sites producing the data are having some kind of effect on the resultant metabolite measurements, and that any significant differences in metabolite concentration clearly cannot be said to have come from the radiation dosage alone.
+
+####ANOVA between Fold-Change Value and Radiation Dosage:
+
+```{r 1WAY ANOVA OF FOLD CHANGE VS DOSE}
+Dose <- as.factor(dat$radiation_dose)
+anova(lm(Fold_Change ~ Dose))
+```
+With a very low p=value of 7.686E-5, this ANOVA shows that the metabolite concentrations across the different radiation levels are clearly different. However, due to the results of the first ANOVA, which essentially analyzed the degree of batch effects, these results cannot be relied upon as the sole causative factor.
+
+---
+
+###Two-Way ANOVA Testing
+
+As noted in the one-way ANOVA, there seems to be an effect on the recorded metabolite concentrations based on both the site and dosage. However, a third factor may at play in the form of dependence between the dose and site e.g. that the metabolite results recorded at each dosage follow a pattern that is based on the site. To test this, the two-way ANOVA test will simultaneously analyze if there is a difference between the metabolite concentration means across the sites and across the dosages, but will also check for statistical interaction between the sites and dosages.
+
+```{r 2WAY ANOVA OF FOLD CHANGE VS DOSE AND SITE}
+anova(lm(Fold_Change ~ Dose + Site))
+```
+
+The analysis above shows, as before, that together both dose and site cause a statistically significant difference in metabolite concentration means. The next test will evaluate this again, but will also take into consideration dose-site interaction.
+
+```{r 2WAY ANOVA OF FOLD CHANGE VS DOSE AND SITE WITH INTERACTION}
+anova(lm(Fold_Change ~ Dose + Site + Dose*Site))
+```
+
+In this last analysis, both individual variables again show significant effect on the mean, but with a p-value of 0.11, there is no significant effect due to interaction between the two variables, meaning that they are independent of each other. This does not mean that batch effects are *not* present due to different lab sites, as batch effects are confirmed by the individual tests, but instead leads to the conclusion that the dose results are not dependent on the site, and vice-versa.
+
+---
+
+###Conclusions
+
+The boxplots values above logically corroborate the information provided by ANOVA tests. While there did appear to be a significant effect on the metabolite concentrations caused by the dosage levels, there was also an effect noted based on the site of origin. However, the two-way ANOVA reveals that the effects on the results from the dosage levels are independent from the site, meaning that the dosage by itself does cause a significant change irrespective of influence from lab site. This is a singularly important use of the two-way ANOVA, due to the fact that it allows us to discern whether or not batch effects are having a meaningful impact on the quality and usefulness of the data.  
+
+While the data does show significant results, it is unclear what conclusions can be drawn from them, due mostly to the fact that there is little background information provided with the data. All that can reliably be said is that higher dosage causes a reduction in metabolite concentration. Speculatively, it might be said that higher doses of radiation cause enough cellular damage to inhibit metabolic processes in the cells. 
+
+---
+
+##Survival Analysis in Colorectal Cancer
+
+Normally used widely as an antihelminthic, levamisole has been used in conjunction with the chemotherapy drug fluorouracil to investigate their combined potential in treating colorectal cancers post-resection. After removing operable colorectal carcinomas from patients, these drugs were used in a study with the hopes that their general toxicity in the body would render a chemotherapeutic effect, eradicating remaining cancer cells and preventing recurrence.
+
+Several survival analyses can be performed on the data generated by this study. The main effect of drug treatment group vs. placebo control group on cancer recurrence will be analyzed, as will the effects of gender on both the control and treatment recurrence, and the effects of cancerous lymph node presence between the two groups. 
+
+Throughout these analyses, the term "survival" will be used to reference the rates generated by the Kaplan-Meier survival models. However, "survival" in the context of this study should be taken to indicate a lack of colorectal cancer recurrence i.e. cancer remission.   
+
+```{r SETUP SURVIVAL DATA}
+library(splines)
+library(survival)
+
+colon_data <- read.csv("colon_dataset.csv", header=T)
+colnames(colon_data) <- c("Treatment","Sex","Status","Node4","Time","Etype")
+attach(colon_data)
+```
+
+---
+
+###Survival Analysis of Treatment vs. Control
+
+The main analysis being performed will consist of comparing the survival rates between the treatment group and the control, which in this instance is a placebo group. The "event" will be scored as recurrence of the cancer, and each individual in the analysis either reached the event or was censored. 
+
+The graph below shows the "survival" rates (lack of recurrence) between the two groups as a function of time:
+
+```{r SURVIVAL TREATMENT VS PLACECBO}
+survival_TvP <- Surv(Time, Status)~Treatment
+
+sfit_TvP <- survfit(survival_TvP)
+plot(sfit_TvP, lty=c("solid","dashed"), col=c("black","blue"), 
+     xlab="Days Until Recurrence", ylab="Percentage Free of Recurrence", 
+     main="Time Until Recurrence,\nLevamisole+Fluorouracil Treatment vs. Placebo")
+legend("topright", c("Treatment","Placebo"), 
+       lty=c("solid","dashed"), col=c("black","blue"))
+```
+
+The survival rate drops continuously, as is usual, but plateaus gently to a fairly high survival, indicating that the main risk of cancer recurrence occurs early on in the study in the steeper decline between 1 and 2 years post-surgery. The treatment group shows consistently higher survival rates throughout the time period, suggesting that the treatment prolongs remission time.
+
+Despite the higher survival in treatment, statistical analysis must be performed to check for statistically significant differences between the two survival trends:
+
+```{r}
+log_rank_TvP=survdiff(survival_TvP)
+log_rank_TvP
+```
+
+The resultant p-value of 1.26E-5 indicates significant difference between the two curves, meaning that the treatment group did indeed show higher survival rates. If all else is equal, this would indicate that the drug combination likely caused this longer remission period in the patients, presumably by helping to eradicate any remaining cancer cell populations.
+
+Further analyses can be performed to reveal survival differences between other variables in the study, such as gender.
+
+---
+
+###Survival Analysis of Male vs. Female
+
+In these two analyses, the effects of gender on survival rate will be observed. To eliminate confounding variables, the study group has been split into the placebo and treatment groups, thus allowing us to analyze the effects of gender without the effect of treatment versus control.
+
+The first analysis below shows the survival rates between sexes in the placebo group.
+
+```{r SURVIVAL MALE VS FEMALE PLACEBO}
+placebo <- colon_data[which(Treatment=="Obs"),]
+survival_sex_plac <- Surv(placebo$Time, placebo$Status)~placebo$Sex
+
+sfit <- survfit(survival_sex_plac)
+plot(sfit, lty=c("solid","dashed"), col=c("black","blue"), 
+     xlab="Days Until Recurrence", ylab="Percentage Free of Recurrence", 
+     main="Time Until Recurrence,\nMale vs. Female, Placebo Group")
+legend("topright", c("Female","Male"), 
+       lty=c("solid","dashed"), col=c("black","blue"))
+```
+
+Because the curves for both male and female seem to trace through the same values, the graph suggests that in the placebo group no difference was seen in cancer recurrence rates between males and females. Once again, we can confirm or reject the trends assumed from the graph by significance testing. 
+
+```{r}
+log_rank=survdiff(survival_sex_plac)
+log_rank
+```
+
+The p-value produced when analyzing the difference between the two curves lies at p=0.784. With such a high p-value, the test confirms that no difference in cancer recurrence rates was seen in the placebo group between genders. 
+
+The next graph shows the survival rates between men and women in the *treatment* group:
+
+```{r SURVIVAL MALE VS FEMALE TREATMENT}
+treated <- colon_data[which(Treatment=="Lev+5FU"),]
+survival_sex_treat <- Surv(treated$Time, treated$Status)~treated$Sex
+
+sfit_sex_treat <- survfit(survival_sex_treat)
+plot(sfit_sex_treat, lty=c("solid","dashed"), col=c("black","blue"), 
+     xlab="Days Until Recurrence", ylab="Percentage Free of Recurrence", 
+     main="Time Until Recurrence,\nMale vs. Female, Treatment Group")
+legend("topright", c("Female","Male"),
+       lty=c("solid","dashed"), col=c("black","blue"))
+```
+
+The curves in the treatment group's visualization differ from the placebo group's in that it appears males have responded better to the treatment. While the divide is not quite as wide as seen in the whole difference between treatment and placebo, there is evidence for a significant difference between the sexes. The following table shows significance testing between the curves:
+
+```{r}
+log_rank_sex_treat=survdiff(survival_sex_treat)
+log_rank_sex_treat
+```
+
+The test confirms that men did in fact have higher survival rates than women in the control group. Because this was not seen in the control group, it may be that men respond better to the levamisole/fluorouracil treatment. In fact, according to the graphs, it would appear that the survival rates for females remained largely unaltered. This would suggest that overall improvements in the study group as a whole may come solely from improvements in male outcome, while female outcome remains unchanged. Despite this evidence, it is not immediately clear from the data *why* this pattern emerges. In fact, other studies have shown the opposite effect, where women showed greater improvement.
+
+Differences in cancer mechanisms have been noted in other cancers, such as male and female breast cancers, that leave cancers between genders susceptible and resistant to differing treatments. However, in the case of breast cancer, there are clear and obvious physiological differences between male and female breast tissue. In the case of the colon, these differences are not as apparent, and so without further data the causal variation remains unknown. It may very well be that some other confounding factor is present that causes bias within the sample, and further statistical analysis beyond survival analysis may prove useful.
+
+---
+
+###Survival Analysis of the Presence of Cancerous Lymph Nodes
+
+In the field of oncology, a sentinel lymph node acts as one of the primary lymph nodes that would drain a tumor, leading it to be a likely location for the development of further metastatic tumors or other secondary cancerous growth. In this study, the presence of cancerous cells in lymph nodes near the removed colon carcinoma was noted in each individual. Logically, higher counts of cancer-containing lymph nodes would put an individual for higher risk of cancer recurrence post-surgery. In the next analysis, recurrence rates are compared between individual with more than 4 cancerous lymph nodes detected versus individuals with 4 or less. Again, to remove the treatment variable, two analyses are performed, one for the treatment group and a second for the control group.
+
+The first graph shows survival curves for the two groups of lymph node counts in the placebo group.
+
+```{r SURVIVAL 4NODES PLACEBO}
+survival_nodes_p <- Surv(placebo$Time, placebo$Status)~placebo$Node4
+
+sfit_nodes_p <- survfit(survival_nodes_p)
+plot(sfit_nodes_p, lty=c("solid","dashed"), col=c("black","blue"), 
+     xlab="Days Until Recurrence", ylab="Percentage Free of Recurrence", 
+     main="Time Until Recurrence vs\n Number of Cancerous Lymph Nodes, Placebo Group")
+legend("topright", c("<= 4","> 4"),
+       lty=c("solid","dashed"), col=c("black","blue"))
+```
+
+As expected, individuals with more than 4 cancerous lymph nodes near the site of the removed tumor show what appears to be a drastically increased chance of cancer recurrence, while those with less than 4 show recurrence rates that appear more similar to the overall survival curves of the whole placebo and treatment groups shown before. The following table tests the difference for significance:
+
+```{r}
+log_rank_nodes_p=survdiff(survival_nodes_p)
+log_rank_nodes_p
+```
+ 
+The p-value of 6.66E-7 confirms that the observed difference in survival rates is significant, with higher cancerous lymph nodes corresponding to an increased rate of cancer recurrence in the placebo group.
+
+Next, the treatment is group is analyzed for the same difference.
+
+```{r SURVIVAL 4 NODES TREATMENT}
+survival_nodes_t <- Surv(treated$Time, treated$Status)~treated$Node4
+
+sfit_nodes_t <- survfit(survival_nodes_t)
+plot(sfit_nodes_t, lty=c("solid","dashed"), col=c("black","blue"), 
+     xlab="Days Until Recurrence", ylab="Percentage Free of Recurrence", 
+     main="Time Until Recurrence vs\n Number of Cancerous Lymph Nodes, Treatment Group")
+legend("topright", c("<= 4","> 4"),
+       lty=c("solid","dashed"), col=c("black","blue"))
+```
+
+The same trend as the placebo group is shown again in the treatment group. Again, this difference in tested for significance.
+
+```{r}
+log_rank_nodes_t=survdiff(survival_nodes_t)
+log_rank_nodes_t
+```
+
+A significant p-value is obtained at p=1.55E-8. While this may be expected, it is nonetheless revealing. Despite the differences noted in the overall treatment versus placebo analysis, which suggest that the combined treatment is successful in improving and elongating cancer remission, the results of these analyses on lymph node count reveal that these individuals with higher cancerous lymph nodes are at a greater risk for recurrence. The differences between the high and low cancerous lymph node count in both the treatment and controls do show that both group improve by approximately the same margin however, which may indicate that this combined treatment is still of benefit to both groups.  
+
+---
+
+###Conclusions
+
+The survival analyses performed offer very informative statistics on the results of this study. While overall it appears that there are clear improvements in the outcomes of patients after treatment with levamisole and fluorouracil, sub-group survival rates show marked differences in the effect on men and women, and also show increased recurrence in patients with higher amounts of cancerous lymph nodes, despite the reduction in rates post-treatment. These factors must be considered when devising treatment options. For further studies, the difference in the mechanism of effect between men and women should be explored further, as should alternative treatments for patients with higher amounts of secondary cancers, such as in sentinel lymph nodes, since these cancers dramatically increase the chance of recurrence, with or without treatment.

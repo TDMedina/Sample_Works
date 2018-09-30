@@ -1,0 +1,136 @@
+---
+title: "Medical Genomics Assignment 2"
+author: "Ty Medina"
+date: "11 April 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library("GEOquery")
+library("Biobase")
+library("multiClust")
+library("preprocessCore")
+```
+
+```{r}
+suppressPackageStartupMessages(library(ctc))
+suppressPackageStartupMessages(library(gplots))
+suppressPackageStartupMessages(library(dendextend))
+library("ctc")
+library("gplots")
+library("dendextend")
+library("graphics")
+library("grDevices")
+library("amap")
+```
+
+```{r}
+raw <- as.matrix(read.table("GSE25066_noheader.txt", header=T, sep="\t", row.names=1, as.is=1))
+raw <- raw[1:(nrow(raw)-1),]
+minimal <- ExpressionSet(assayData=raw)
+expr <- exprs(minimal)
+```
+
+
+```{r Data Import and Normalization}
+# Import accession from GEO
+GSE25066 <- getGEO(GEO="GSE25066")
+#test <- expression()
+#test2 <- ExpressionSet(assayData = test)
+# Store expression data from the accession
+expr <- exprs(GSE25066[[1]])
+#expr <- exprs(data)
+# Store the phenotype data from the accession
+phenotypes <- pData(phenoData(GSE25066[[1]]))
+
+# Write the the expression data and phenotype data to external files
+#WriteMatrixToFile(tmpMatrix=data.gse, tmpFileName="GSE25066.expression.txt", blnRowNames=T, blnColNames=T)
+#WriteMatrixToFile(tmpMatrix=pheno, tmpFileName="GSE25066.clinical.txt", blnRowNames=T, blnColNames=T)
+
+# Quantile normalize the data
+expr_norm <- normalize.quantiles(expr, copy=F)
+# Offset the data by the lowest value if there are negative values, to prevent log domain errors
+if (min(expr_norm) < 0) {
+expr_norm = expr_norm + abs(min(expr_norm)) + 0.00001}
+# Log2 scale the data
+expr_log <- t(apply(expr_norm, 1, log2))
+
+# Write the normalized expression data to an external file
+#WriteMatrixToFile(tmpMatrix = expr_log, tmpFileName="GSE25066.normalized.expression.txt", blnRowNames = T, blnColNames = T)
+
+# Get survival times/outcomes from file
+outcomes <- read.delim2(file="GSE25066-DFS-Clinical-Outcome.txt", header=T)
+```
+
+```{r Number of Probes}
+# Fixed
+gene_num_fix <- number_probes(input="GSE25066", data.exp=expr_log, Fixed=1000, Percent=NULL, Poly=NULL, Adaptive=NULL)
+
+# Percentage
+gene_num_per <- number_probes(input="GSE25066", data.exp=expr_log, Fixed=NULL, Percent=1, Poly=NULL, Adaptive=NULL)
+
+# Polynomial distribution
+gene_num_pol <- number_probes(input="GSE25066", data.exp=expr_log, Fixed=NULL, Percent=NULL, Poly=T, Adaptive=NULL)
+
+# Adaptive Gaussian: Takes 3 hours, can't run on the cluster due to lack of GEOquery due to lack of openssl,
+# and doesn't currently work anyway due to this error:
+# Error in read.table(file = file, header = header, sep = sep, quote = quote,  : 
+# duplicate 'row.names' are not allowed
+gene_num_gmm <- number_probes(input="GSE25066", data.exp=expr_log, Fixed=NULL, Percent=NULL, Poly=NULL, Adaptive=T, cutoff=0.05)
+```
+
+```{r Probe Ranking and Selection}
+rank_fixed_CV <- probe_ranking(input="GSE25066", data.exp=expr_log, probe_number=gene_num_fix, probe_num_selection="Fixed_Probe_Num", method="CV_Rank")
+rank_fixed_GU <- probe_ranking(input="GSE25066", data.exp=expr_log, probe_number=gene_num_fix, probe_num_selection="Fixed_Probe_Num", method="CV_Guided")
+rank_fixed_SD <- probe_ranking(input="GSE25066", data.exp=expr_log, probe_number=gene_num_fix, probe_num_selection="Fixed_Probe_Num", method="SD_Rank")
+rank_fixed_Py <- probe_ranking(input="GSE25066", data.exp=expr_log, probe_number=gene_num_fix, probe_num_selection=NULL, method="Poly")
+
+rank_percent_CV <- probe_ranking(input="GSE25066", data.exp=expr_log, probe_number=gene_num_per, probe_num_selection="Percent_Probe_Num", method="CV_Rank")
+rank_percent_GU <- probe_ranking(input="GSE25066", data.exp=expr_log, probe_number=gene_num_per, probe_num_selection="Percent_Probe_Num", method="CV_Guided")
+rank_percent_SD <- probe_ranking(input="GSE25066", data.exp=expr_log, probe_number=gene_num_per, probe_num_selection="Percent_Probe_Num", method="SD_Rank")
+rank_percent_Py <- probe_ranking(input="GSE25066", data.exp=expr_log, probe_number=gene_num_per, probe_num_selection=NULL, method="Poly")
+
+rank_poly_CV <- probe_ranking(input="GSE25066", data.exp=expr_log, probe_number=gene_num_pol, probe_num_selection="Adaptive_Probe_Num", method="CV_Rank")
+rank_poly_GU <- probe_ranking(input="GSE25066", data.exp=expr_log, probe_number=gene_num_pol, probe_num_selection="Adaptive_Probe_Num", method="CV_Guided")
+rank_poly_SD <- probe_ranking(input="GSE25066", data.exp=expr_log, probe_number=gene_num_pol, probe_num_selection="Adaptive_Probe_Num", method="SD_Rank")
+rank_poly_Py <- probe_ranking(input="GSE25066", data.exp=expr_log, probe_number=gene_num_pol, probe_num_selection=NULL, method="Poly")
+
+rank_gmm_CV <- probe_ranking(input="GSE25066", data.exp=expr_log, probe_number=gene_num_gmm, probe_num_selection="Adaptive_Probe_Num", method="CV_Rank")
+rank_gmm_GU <- probe_ranking(input="GSE25066", data.exp=expr_log, probe_number=gene_num_gmm, probe_num_selection="Adaptive_Probe_Num", method="CV_Guided")
+rank_gmm_SD <- probe_ranking(input="GSE25066", data.exp=expr_log, probe_number=gene_num_gmm, probe_num_selection="Adaptive_Probe_Num", method="SD_Rank") rank_gmm_Py <- probe_ranking(input="GSE25066", data.exp=expr_log, probe_number=gene_num_gmm, probe_num_selection=NULL, method="Poly")
+``` 
+
+```{r Number of Clusters}
+cluster_num_fix <- number_clusters(data.exp=expr_log, Fixed=3, gap_statistic=NULL)
+cluster_num_stat <- number_clusters(data.exp=expr_log, Fixed=NULL, gap_statistic=T)
+```
+
+```{r}
+ranks = c(rank_poly_Py, rank_poly_SD, rank_poly_GU, rank_poly_CV,
+          rank_percent_Py, rank_percent_SD, rank_percent_GU, rank_percent_CV,
+          rank_fixed_Py, rank_fixed_CV, rank_fixed_SD, rank_fixed_GU)
+
+kmeans_clust <- cluster_analysis(sel.exp=rank_percent_SD,
+                                 cluster_type="Kmeans",
+                                 distance=NULL,
+                                 linkage_type=NULL,
+                                 gene_distance=NULL,
+                                 num_cluster=cluster_num_fix,
+                                 data_name="TEST",
+                                 probe_rank="SD_Rank",
+                                 probe_num_selection="Percent_Probe_Num",
+                                 cluster_num_selection="Fixed_Clust_Num")
+
+hiera_clust <- cluster_analysis(sel.exp=rank_percent_SD,
+                                cluster_type="HClust",
+                                distance="euclidean",
+                                linkage_type="ward.D2",
+                                gene_distance="correlation",
+                                num_cluster=cluster_num_fix,
+                                data_name="TEST",
+                                probe_rank="SD_Rank",
+                                probe_num_selection="Percent_Probe_Num",
+                                cluster_num_selection="Fixed_Clust_Num")
+```

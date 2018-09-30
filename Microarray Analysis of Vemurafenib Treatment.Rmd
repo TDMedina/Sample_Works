@@ -1,0 +1,248 @@
+---
+title: "Microarray Analysis:"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache=FALSE)
+```
+
+##Vemurafenib Treatment of BRAF^V600^ Melanoma Cells
+
+BRAFV600 variants are implicated in the proliferation of melanoma cells in humans. By inhibiting BRAF activity in melanoma cells, the growth of tumors can be slowed.
+
+In the study "Response of BRAF mutant melanoma to BRAF inhibition is mediated by a network of transcriptional regulators of glycolysis" (Parmenter et al. 2014), a BRAF inhibitor, vemurafenib, was used to inhibit melanoma cell growth. Microarray analysis was performed to show that the mechanism involved the down-regulation of the glycolysis pathway.
+
+In this analysis, the expression microarray data will be analyzed to see if the findings can be replicated. The following packages will be loaded and used throughout the analysis:
+
+```{r message=FALSE, warning=FALSE, echo=TRUE}
+library(oligo)
+library(pd.hugene.1.0.st.v1)
+library(hugene10sttranscriptcluster.db)
+library(limma)
+library(gplots)
+library(topGO)
+library(Rgraphviz)
+```
+***
+
+###Data
+
+To begin the analysis, the data from the 3 controls and 3 vemurafenib treatments is first imported from a series of .cel files into a data set. After this, quality control, which includes the following, is performed on the raw data:
+
+* Background corrected
+* Normalization
+* Log transformation
+* Median polish
+
+The resultant normalized data is stored in an expression data set.
+```{r}
+pd <- read.AnnotatedDataFrame("VemurData.txt")
+raw_geneset <- read.celfiles(paste("./", rownames(pd), sep=""))
+norm_expset <- rma(raw_geneset, target="core")
+```
+***
+
+###Annotations
+
+For ease of use and interpretation, the normalized data is then annotated by adding feature (probe-set) data to the expression set, which is provided on the .cel files by the chip manufacturer, Affymetrix.
+```{r}
+featureData(norm_expset) <- getNetAffx(norm_expset, type="transcript")
+```
+After adding manufacturer information about each probe, the main gene probes are moved into a new expression set to separate them from control and housekeeping probes.
+```{r}
+gene_expset <- norm_expset[fData(norm_expset)[,"category"] %in% "main",]
+```
+####Annotation Table
+
+To facilitate access to the annotations on the chip for reference purposes, important annotation information is stored in a table. The table will include:
+
+* Probe-set ID
+* Name of the gene associated with the probe
+* Symbol of the gene
+
+Note that accession number information is not included, as there are multiple accession numbers for each probe.
+```{r}
+expression_levels <- exprs(gene_expset)
+ids <- rownames(expression_levels)
+#accessions <- unlist(mget(ids, hugene10sttranscriptclusterACCNUM, ifnotfound=NA))
+genenames <- unlist(mget(ids, hugene10sttranscriptclusterGENENAME, ifnotfound=NA))
+symbols <- unlist(mget(ids, hugene10sttranscriptclusterSYMBOL, ifnotfound=NA))
+annotation_table <- cbind(id=ids, genename=genenames, symbol=symbols)
+```
+***
+
+###Data Visualization
+
+To begin analyzing the data,gene expression levels are first visualized to perform a rough assessment of the data quality and processing.
+
+####Raw Data Boxplot
+
+In the following plot, the raw expression data from each chip is displayed after a simple log transform. Each boxplot varies, but part of this overall variation can be explained as a chip artifact.
+```{r}
+box_names <- c(paste("Control",seq(1:3)),paste("Vemurafenib",seq(1:3)))
+boxplot(log2(exprs(raw_geneset)), las=2, ylab="Expression", names=box_names, main="Raw Expression Levels")
+```
+
+####Normalized Data Boxplot
+
+These boxplots represent the data after normalization, which removes variation that can be attributed to differences in the overall chip expression intensities, rather than differences in the real gene expression levels. The general alignment in the data indicates that differences between expression levels are caused by the genes, not the chips. 
+```{r}
+boxplot(gene_expset, las=2, ylab="Expression", names=box_names, main="Normalized Expression Levels")
+```
+
+####Histogram
+
+The following histogram shows the expression levels across all 6 chips, further enforcing the idea that normalization has successfully aligned expression levels between the chips.
+```{r}
+hist(gene_expset, main="Histogram of Normalized Array\nExpression Data", ylab="Percentage", xlab="Log Expression Level")
+```
+
+####Correlation Heatmap
+
+The heatmap below demonstrates correlation between chip data. While the graphic itself will not necessarily show any particularly interesting correlation between samples, it does provide confirmation that the control group and treatment group correlate with themselves. This consistency between sample groups allows us to draw more conclusive results from the data, and ensures that no massive procedural errors are present, such as miss-labeling of samples.
+```{r}
+lab <- paste(pd$sampleID)
+heatmap.2(cor(exprs(gene_expset))^2, trace="none", scale="none", margins=c(9,9), labRow=lab, labCol=lab)
+```
+
+####Multidimensional Scaling
+
+By reducing the variations in the data to one main source of variation and an orthogonal source of variation, the main similarities and difference can be more easily observed. This MDS graph shows that while the control samples are generally very similar, and the control and treatment groups differ greatly, the treatment groups are *also* different from each other. 
+
+While initially the differences in the treatment groups might be attributed to the chaotic nature of cancer cells, the control cells are *also* cancer cells (as per the experiment's accessions page), and do not exhibit this difference:
+
+*"BRAFV600E A375 human melanoma cells were treated with vehicle (0.1% DMSO) or 10 ??M vemurafenib for 24 h after which total RNA was extracted." *
+
+The cell cultures do not differ in origin or in time after treatment, so the only thing that can be said about procedural differences in the treatment samples are the days on which they were cultured and treated. Because the treatment samples differ so widely per MDS, this may weaken confidence in the results obtained, or indicate errors in data handling. 
+```{r}
+col <- as.numeric(factor(pd$studyGroup))+2
+plotMDS(gene_expset, labels=lab, col=col, main="Multidimensional Scaling of Data")
+```
+
+###Linear Modeling
+
+After visualizing data quality, linear modelling is performed. To compare the control and treatment groups, a design matrix is first created to assign the samples to two groups.
+```{r}
+design <- cbind(
+C=as.numeric(pd$studyGroup=="C"),
+V=as.numeric(pd$studyGroup=="V")
+)
+design
+```
+Because the data from each array may fit the linear model better or worse, more weight is given to data that fits the model closer. The following plot demonstrates the weight given to each chip.
+```{r}
+array_weighting <- arrayWeights(gene_expset, design) 
+barplot(array_weighting, main="Array Weights", names=box_names, las=2, ylab="Weighting")
+array_weighting 
+```
+Finally, the linear model is fit to the data, taking into consideration the weights of each array. The two groups are contrasted, and the resulting differences are transformed using a Bayesian model.
+```{r}
+fit <- lmFit(gene_expset, design, weight=array_weighting)
+
+contrasts <- makeContrasts(V-C, levels=design)
+
+fit2 <- contrasts.fit(fit, contrasts)
+fit3 <- eBayes(fit2)
+```
+***
+
+###Model Results
+
+The resultant data from the linear model statistical tests for each probe can now be stored for reference in a data table, which is sorted by statistical significance of adjusted p-values. From this table, a truncated table "sig" is generated which includes only significant (p <= 0.05) genes that also exhibit a fold-change of at least 2.
+```{r}
+top<-topTable(fit3, coef=1, n=nrow(fit3))
+
+sig <- top[top$adj.P.Val <= 0.05 & (top$logFC >= 1 | top$logFC <= -1),] 
+```
+The significant gene table contains many annotation entries for each gene, so for brevity, an external file containing only significant values and biological information is generated.
+```{r}
+write.table(sig[c(1,5,6,18:24,8:9)], "Significant_Genes.csv", sep =",", row.names=FALSE)
+```
+
+###Visualization
+
+####Volcano Plot
+A scatterplot referred to as a "volcano plot" can be generated to show the expression and significance levels of all genes in the arrays, with significantly high and low scores highlighted. All points in red represent genes that shows a p-value lower than 0.05 and a fold-change of at least 2, indicating a difference in expression of at least double or half. These data points are also the genes represented in the "sig" table.   
+```{r}
+plot(top$logFC, -log10(top$adj.P.Val), pch="*", xlab=expression("Log"[2]*"  Fold Change"), ylab=expression("-Log"[10]*" Adjusted P-Value"), main="Volcano Plot")
+abline(h=-log10(0.05), v=c(-1, 1), col="red", lty=2)
+points(sig$logFC, -log10(sig$adj.P.Val), col="red", pch="*")
+```
+
+####Heatmap
+
+The following heatmap represents the differences in expression level for each gene between the samples. Each column shows the genes of a sample. Genes in red indicate relatively reduced expression, while green indicates relatively higher expression. Relative expression is consistent between the samples of each group, while expression levels differ greatly between the two groups.
+```{r fig.height=15, fig.width=5, warning=FALSE}
+sig_exprs<-expression_levels[rownames(expression_levels) %in% as.character(sig$transcriptclusterid),]
+
+heatmap.2(sig_exprs, trace="none", scale="row", col="redgreen", cexRow=0.2, cexCol=0.7, labCol=box_names)
+```
+*** 
+
+###Gene Set Enrichment Analysis
+
+To begin interpreting the expression data and linking it to biologically relevant mechanisms, the topGO package is used to check for biological processes that are over-represented by the significant genes.
+
+####Preparation of Data
+
+Because a list of significant genes of interest has already been obtained through linear modelling, topGO's filtering and selection process will not be used, and instead a list of manually selected genes will be used. This is accomplished by comparing each gene from the whole dataset to those contained in the "sig" table of significant genes. 
+
+To differentiate between over expression and under expression, the sig list is split in two based off of positive or negative log fold-change:
+```{r}
+undergene <- sig[sig$logFC <= -1,]
+overgene <- sig[sig$logFC >= 1,]
+```
+Two lists of desired genes are then created by comparing each list to the "under" and "over" tables. For each gene in the whole set that is also a significant gene in the table, a value of "1" is written to a list, while a value of "0" is written for each gene that is not present on the significant gene list. 
+
+```{r, message=FALSE, warning=FALSE}
+geneListover <- factor(as.integer(top$transcriptclusterid %in% overgene$transcriptclusterid))
+geneListunder <- factor(as.integer(top$transcriptclusterid %in% undergene$transcriptclusterid))
+```
+Once this list of "0" and "1" values is made, each list entry is assigned its respective probe ID number as a name, making a named vector that dictates whether or not ("1" vs "0") the gene will be used. 
+```{r}
+names(geneListover) <- top$transcriptclusterid
+names(geneListunder) <- top$transcriptclusterid
+```
+After these two named vectors are made, topGO objects can be created to carry out the analysis. Information that needs to be provided to these data sets include:
+
+* The list of genes to be analyzed
+* The type of ontology to be analyzed
+* The minimum node size to be considered
+* The topGO function to map the chip annotations to the GO terms
+* The chip annotation package
+
+The lists of genes just prepared above will be used, and a biological ("BP") ontology will be created. The minimum node size (the number of genes required to establish a point of commonality) to be considered will be 5, as this is the minimum size recommended for stability by topGO. The default topGO "annFUN.db" mapping set will be used, as the annotation package used for the Affymetrix chip in the study is readily available from Bioconductor. Finally, the chip annotation used for the analysis will be "hugene10sttranscriptcluster.db". 
+
+While the "pd.hugene.1.0.st.v1" package was used for the creation of annotation in the gene expression set, unfortunately the topGO package automatically appends the file type ".db" to the annotation package name while attempting to load it, causing the "pd.hugene.1.0.st.v1" package to be unrecognized. Because of this error, the "hugene10sttranscriptcluster.db" was used instead.
+
+Thus, two topGO data objects will be created, one containing over-expressed genes, one containing under-expressed genes.
+```{r}
+overGOdata <- new("topGOdata", description="Over-Expressed in Treatment", ontology="BP", allGenes=geneListover, nodeSize=5, annot=annFUN.db, affyLib="hugene10sttranscriptcluster")
+
+underGOdata <- new("topGOdata", description="Under-Expressed in Treatment", ontology="BP", allGenes=geneListunder, nodeSize=5, annot=annFUN.db, affyLib="hugene10sttranscriptcluster")
+```
+
+***
+
+####GO Visualization
+
+A Fisher's Exact Test is used to score the significance of each node in the ontology. Nodes can then be graphed, with increasing significance represented from pale yellow to bright red. Rectangular nodes represent nodes that pass the significance threshold, and represent gene sets that are enriched. 
+```{r}
+overFisher <- runTest(overGOdata, algorithm = "classic", statistic = "fisher")
+underFisher <- runTest(underGOdata, algorithm = "classic", statistic = "fisher")
+
+overGOgraph <- showSigOfNodes(overGOdata, score(overFisher), firstSigNodes = 15, useInfo = 'all')
+underGOgraph <- showSigOfNodes(underGOdata, score(underFisher), firstSigNodes = 15, useInfo = 'all')
+
+#printGraph(overGOgraph, overFisher, firstSigNodes = 30, fn.prefix = "test", useInfo = "all", pdfSW = TRUE)
+#printGraph(underGOgraph, underFisher, firstSigNodes = 30, fn.prefix = "test", useInfo = "all", pdfSW = TRUE)
+```
+
+####GSEA Interpretation
+
+From the nodes deemed significant in the graph of over-expressed genes in the treatment group (positive fold-change), there does not seem to be a general theme. Cell adhesion and several developmental pathways are over-expressed, but do not immediately present any common element regarding their cancer status, growth, or treatment response.
+
+However, from the significant nodes in the graph of *under*-expressed genes in the treatment group (negative fold-change), there is a clearly a common under-expression of cell cycle genes. This indicates that vemurafenib treatment reduced the growth and proliferation of the cancer cells. 
+
+Despite the obvious decrease in reproductive activity, the suggested mechanism by BRAF and glycolysis inhibition was not obviously represented by this topGO analysis.
